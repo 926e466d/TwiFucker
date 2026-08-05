@@ -26,6 +26,7 @@ import icu.nullptr.twifucker.getId
 import icu.nullptr.twifucker.hook.HookEntry.Companion.currentActivity
 import icu.nullptr.twifucker.hook.HookEntry.Companion.dexKit
 import icu.nullptr.twifucker.hook.HookEntry.Companion.loadDexKit
+import icu.nullptr.twifucker.hook.TweetMedia
 import icu.nullptr.twifucker.hostAppLastUpdate
 import icu.nullptr.twifucker.moduleLastModify
 import icu.nullptr.twifucker.modulePrefs
@@ -37,7 +38,7 @@ object DownloadHook : BaseHook() {
         get() = "DownloadHook"
 
     private var cachedTweetId = 0L
-    private var cachedDownloadUrls: List<String> = listOf()
+    private var cachedDownloadUrls: List<TweetMedia> = listOf()
 
     // tweet share download button
     private const val HOOK_TWEET_SHARE_CLASS = "hook_tweet_share_class"
@@ -117,7 +118,9 @@ object DownloadHook : BaseHook() {
     private lateinit var variantsFieldName: String
 
     override fun init() {
-        if (!modulePrefs.getBoolean("enable_download_hook", false)) return
+        // runtime-gated: hooks install always, behavior is checked when they
+        // fire — so toggling "enable_download_hook" in the settings dialog
+        // takes effect immediately without an app restart
 
         try {
             loadHookInfo()
@@ -133,6 +136,7 @@ object DownloadHook : BaseHook() {
             MethodFinder.fromClass(loadClass(className)).filterByName("onClick").first()
                 .createHook {
                     beforeMeasure(name) { param ->
+                        if (!modulePrefs.getBoolean("enable_download_hook", false)) return@beforeMeasure
                         if (cachedTweetId == 0L || cachedDownloadUrls.isEmpty()) return@beforeMeasure
                         val actionItemViewData = XposedHelpers.getObjectField(
                             XposedHelpers.getObjectField(
@@ -166,6 +170,7 @@ object DownloadHook : BaseHook() {
         MethodFinder.fromClass(loadClass(protectedShareTweetItemAdapterClassName))
             .filterByName("onClick").first().createHook {
                 beforeMeasure(name) { param ->
+                    if (!modulePrefs.getBoolean("enable_download_hook", false)) return@beforeMeasure
                     if (cachedTweetId == 0L || cachedDownloadUrls.isEmpty()) return@beforeMeasure
 
                     val protectedShareTweetItemAdapterTitleTextView = XposedHelpers.getObjectField(
@@ -190,6 +195,7 @@ object DownloadHook : BaseHook() {
         MethodFinder.fromClass(loadClass(tweetShareClassName))
             .filterByName(tweetShareShowMethodName).first().createHook {
                 beforeMeasure(name) { param ->
+                    if (!modulePrefs.getBoolean("enable_download_hook", false)) return@beforeMeasure
                     val shareList = XposedHelpers.getObjectField(
                         param.thisObject, tweetShareShareListFieldName
                     ) as List<*>
@@ -248,6 +254,7 @@ object DownloadHook : BaseHook() {
         MethodFinder.fromClass(loadClass(shareMenuClassName)).filterByName(shareMenuMethodName)
             .first().createHook {
                 beforeMeasure(name) { param ->
+                    if (!modulePrefs.getBoolean("enable_download_hook", false)) return@beforeMeasure
                     val event = param.args[1]
                     // share_menu_click
                     // share_menu_cancel
@@ -269,7 +276,7 @@ object DownloadHook : BaseHook() {
                     val media =
                         XposedHelpers.getObjectField(extendedEntities, mediaFieldName) as List<*>
 
-                    val urls = arrayListOf<String>()
+                    val urls = arrayListOf<TweetMedia>()
                     media.forEach { m ->
                         val mediaType = XposedHelpers.getObjectField(m, mediaTypeFieldName)
                         when (mediaType.toString()) {
@@ -277,7 +284,7 @@ object DownloadHook : BaseHook() {
                                 val mediaUrlHttps = XposedHelpers.getObjectField(
                                     m, mediaUrlHttpsFieldName
                                 ) as String
-                                urls.add(genOrigUrl(mediaUrlHttps))
+                                urls.add(TweetMedia(kind = "image", url = genOrigUrl(mediaUrlHttps)))
                             }
 
                             "VIDEO", "ANIMATED_GIF" -> {
@@ -292,7 +299,7 @@ object DownloadHook : BaseHook() {
                                     XposedHelpers.getObjectField(v, "a") as Int
                                 }[0]?.let {
                                     val url = XposedHelpers.getObjectField(it, "b") as String
-                                    urls.add(clearUrlQueries(url))
+                                    urls.add(TweetMedia(kind = "video", url = clearUrlQueries(url)))
                                 }
                             }
                         }
@@ -533,11 +540,22 @@ object DownloadHook : BaseHook() {
             protectedShareTweetItemAdapterClassTitleField.name
 
         // share menu
-        val shareMenuClass = dexKit.findMethodUsingString {
-            usingString = "^sandbox://tweetview?id=$"
-            methodReturnType = Void.TYPE.name
-        }.first().declaringClassName.let {
-            loadClass(it)
+        // 12.12.0 dropped the "sandbox://tweetview?id=" anchor — fall back to
+        // the share_menu_click handler anchor
+        val shareMenuClass = try {
+            dexKit.findMethodUsingString {
+                usingString = "^sandbox://tweetview?id=$"
+                methodReturnType = Void.TYPE.name
+            }.first().declaringClassName.let {
+                loadClass(it)
+            }
+        } catch (e: NoSuchElementException) {
+            dexKit.findMethodUsingString {
+                usingString = "^share_menu_click$"
+                methodReturnType = Void.TYPE.name
+            }.first().declaringClassName.let {
+                loadClass(it)
+            }
         }
         val shareMenuMethod = MethodFinder.fromClass(shareMenuClass).filterByReturnType(Void.TYPE)
             .filterByParamTypes { it.size == 4 && it[0] == String::class.java && it[1] == String::class.java }

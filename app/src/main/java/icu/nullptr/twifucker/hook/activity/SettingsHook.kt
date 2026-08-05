@@ -25,7 +25,11 @@ object SettingsHook : BaseHook() {
     override val name: String
         get() = "SettingsHook"
 
-    private val aboutActivityClass = loadClass("com.twitter.app.settings.AboutActivity")
+    // AboutActivity may not exist in newer X builds (class renamed/removed) —
+    // keep it nullable so the logo long-press entry still works
+    private val aboutActivityClass: Class<*>? = runCatching {
+        com.github.kyuubiran.ezxhelper.ClassUtils.loadClass("com.twitter.app.settings.AboutActivity")
+    }.getOrNull()
     private val preferenceClass = loadClass("android.preference.Preference")
 
     private lateinit var onVersionClickListenerClassName: String
@@ -53,8 +57,10 @@ object SettingsHook : BaseHook() {
         }
 
         val onVersionClickMethod =
-            MethodFinder.fromClass(aboutActivityClass).filterByParamTypes(preferenceClass)
-                .firstOrNull()
+            aboutActivityClass?.let {
+                MethodFinder.fromClass(it).filterByParamTypes(preferenceClass)
+                    .firstOrNull()
+            }
 
         if (onVersionClickMethod != null) {
             onVersionClickMethod.createHook {
@@ -63,7 +69,9 @@ object SettingsHook : BaseHook() {
                     return@replaceMeasure true
                 }
             }
-        } else {
+        } else if (aboutActivityClass != null) {
+            // AboutActivity exists but no direct version-click method — use the
+            // dexKit fallback search (only when the class is present)
             try {
                 loadHookInfo()
             } catch (t: Throwable) {
@@ -72,7 +80,8 @@ object SettingsHook : BaseHook() {
             }
             val onVersionClickListenerClass = loadClass(onVersionClickListenerClassName)
             val activityField =
-                FieldFinder.fromClass(onVersionClickListenerClass).filterByType(aboutActivityClass)
+                FieldFinder.fromClass(onVersionClickListenerClass)
+                    .filterByType(aboutActivityClass!!)
                     .first()
             MethodFinder.fromClass(onVersionClickListenerClass).filterByParamTypes(preferenceClass)
                 .first().createHook {
@@ -81,6 +90,8 @@ object SettingsHook : BaseHook() {
                         return@replaceMeasure true
                     }
                 }
+        } else {
+            Log.d("SettingsHook: AboutActivity not found — logo long-press entry only")
         }
     }
 
@@ -97,14 +108,15 @@ object SettingsHook : BaseHook() {
     }
 
     private fun searchHook() {
+        val about = aboutActivityClass ?: throw ClassNotFoundException("AboutActivity")
         val onCreateMethod =
-            MethodFinder.fromClass(aboutActivityClass).filterByName("onCreate").first()
+            MethodFinder.fromClass(about).filterByName("onCreate").first()
 
         val onPreferenceClickListenerClass = dexKit.findMethodInvoking {
             methodDescriptor = DexMethodDescriptor(onCreateMethod).descriptor
             beInvokedMethodName = "<init>"
             beInvokedMethodReturnType = Void.TYPE.name
-            beInvokedMethodParameterTypes = arrayOf(aboutActivityClass.name)
+            beInvokedMethodParameterTypes = arrayOf(about.name)
         }.firstNotNullOfOrNull {
             it.value
         }?.firstOrNull()?.getMemberInstance(EzXHelper.classLoader)?.declaringClass

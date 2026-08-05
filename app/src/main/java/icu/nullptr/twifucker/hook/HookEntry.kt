@@ -95,36 +95,18 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
                     Log.d("AttachContext")
                     Log.d("Twitter: $hostVersionName ($hostVersionCode) TwiFucker: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
 
-                    val hooks = arrayListOf(
-                        MainActivityHook,
-                        SettingsHook,
-                        UrlHook,
-                        SelectableTextHook,
-                        DownloadHook,
-                        ActivityHook,
-                        CustomTabsHook,
-                        DrawerNavbarHook,
-                        FeatureSwitchHook,
-                        ViewHook,
-                        HomeTimelineHook,
+                    // UI + ad-filter hooks. The legacy timeline JSON hooks stay
+                    // disabled — they corrupt responses on 12.12.0 ("network
+                    // failed"); the dexkit-dependent hooks are off by default.
+                    val hooks = arrayListOf<BaseHook>(
+                        ActivityHook,      // current-activity tracking (dialogs)
+                        MainActivityHook,  // first-run settings popup + avatar long-press entry
+                        SettingsHook,      // logo long-press / About version-click entry
+                        ViewHook,          // banner hide (prefs-gated, off by default)
+                        DownloadHook,      // legacy download (in-app share sheet)
+                        ShareMediaHook,    // 12.12.0 download: share-intent trigger + captured media
+                        OkHttpFilterHook,  // primary ad filter (12.12.0+)
                     )
-
-                    if (modulePrefs.getBoolean("use_legacy_hook", false)) {
-                        hooks.add(JsonHook)
-                    } else {
-                        hooks.addAll(
-                            listOf(
-                                JsonTimelineEntryHook,
-                                JsonTimelineTweetHook,
-                                JsonTimelineUserHook,
-                                JsonTimelineTrendHook,
-                                SensitiveMediaWarningHook,
-                                JsonProfileRecommendationModuleResponseHook,
-                                JsonFleetsTimelineResponseHook,
-                                JsonTimelineModuleHook,
-                            )
-                        )
-                    }
                     initHooks(hooks)
                     closeDexKit()
                 }

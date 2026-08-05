@@ -60,7 +60,7 @@ android {
     namespace = "icu.nullptr.twifucker"
     compileSdk = 33
     ndkVersion = "25.2.9519653"
-    buildToolsVersion = "33.0.2"
+    buildToolsVersion = "34.0.0"
 
     defaultConfig {
         applicationId = "icu.nullptr.twifucker"
@@ -138,9 +138,12 @@ dependencies {
     implementation(libs.ndk.nativehelper)
 }
 
-val adbExecutable: String = androidComponents.sdkComponents.adb.get().asFile.absolutePath
-
 val restartTwitter = task("restartTwitter").doLast {
+    val adbExecutable: String = try {
+        androidComponents.sdkComponents.adb.get().asFile.absolutePath
+    } catch (e: Exception) {
+        "adb"
+    }
     Runtime.getRuntime().let {
         it.exec("$adbExecutable shell am force-stop com.twitter.android").waitFor()
         it.exec("$adbExecutable shell am start $(pm resolve-activity --components com.twitter.android)")

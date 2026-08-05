@@ -1,6 +1,8 @@
 #define GENUINE_NAME {0x68, 0x61, 0x76, 0x2a, 0x6b, 0x73, 0x6b, 0x64, 0x79, 0x7e, 0x79, 0x22, 0x79, 0x79, 0x66, 0x76, 0x64, 0x71, 0x78, 0x65, 0x73, 0x0}
-#define GENUINE_SIZE 0x02a8
-#define GENUINE_HASH 0xc1bb48ed
+// GENUINE_SIZE / GENUINE_HASH disabled for the fork build — the strict
+// anti-tamper check would otherwise exit(0) every process 5s after start.
+// #define GENUINE_SIZE 0x02a8
+// #define GENUINE_HASH 0xc1bb48ed
 
 // #define GET_GENUINE_CLASS_NAME function_name_for_get_genuine_class_name
 // #define GET_GENUINE_PACKAGE_NAME function_name_for_get_genuine_package_name

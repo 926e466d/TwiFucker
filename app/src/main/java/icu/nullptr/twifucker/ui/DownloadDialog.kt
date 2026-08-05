@@ -20,6 +20,7 @@ import com.github.kyuubiran.ezxhelper.EzXHelper.addModuleAssetPath
 import com.github.kyuubiran.ezxhelper.EzXHelper.appContext
 import com.github.kyuubiran.ezxhelper.Log
 import icu.nullptr.twifucker.R
+import icu.nullptr.twifucker.hook.TweetMedia
 import icu.nullptr.twifucker.modulePrefs
 import java.io.File
 import java.io.FileOutputStream
@@ -27,7 +28,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 class DownloadDialog(
-    context: Context, private val tweetId: Long, downloadUrls: List<String>, onDismiss: () -> Unit,
+    context: Context, private val tweetId: Long, media: List<TweetMedia>, onDismiss: () -> Unit,
 ) : AlertDialog.Builder(context) {
     companion object {
         private fun contentTypeToExt(contentType: String): String {
@@ -63,10 +64,38 @@ class DownloadDialog(
             }
             val outputFile = File(downloadPath, fileName)
             val inputStream = File(appContext.cacheDir, fileName).inputStream()
-            val outputStream = outputFile.outputStream()
-            inputStream.copyTo(outputStream)
-
-            return outputFile.absolutePath
+            try {
+                val outputStream = outputFile.outputStream()
+                inputStream.copyTo(outputStream)
+                return outputFile.absolutePath
+            } catch (t: Throwable) {
+                // scoped storage (Android 10+) — fall back to MediaStore
+                val mime = when {
+                    fileName.endsWith(".mp4") -> "video/mp4"
+                    fileName.endsWith(".webm") -> "video/webm"
+                    fileName.endsWith(".m3u8") -> "application/x-mpegURL"
+                    fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") -> "image/jpeg"
+                    fileName.endsWith(".png") -> "image/png"
+                    fileName.endsWith(".gif") -> "image/gif"
+                    else -> "application/octet-stream"
+                }
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mime)
+                    put(
+                        android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                        Environment.DIRECTORY_DOWNLOADS + "/TwiFucker"
+                    )
+                }
+                val uri = appContext.contentResolver.insert(
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                uri?.let {
+                    appContext.contentResolver.openOutputStream(it)?.use { out ->
+                        File(appContext.cacheDir, fileName).inputStream().copyTo(out)
+                    }
+                }
+                return uri?.toString() ?: ""
+            }
         }
 
         private fun download(
@@ -140,15 +169,15 @@ class DownloadDialog(
     private class DownloadMediaAdapter(
         val context: Context,
         val tweetId: Long,
-        val urls: List<String>
+        val media: List<TweetMedia>
     ) : BaseAdapter() {
 
         override fun getCount(): Int {
-            return urls.size
+            return media.size
         }
 
         override fun getItem(position: Int): Any {
-            return urls[position]
+            return media[position]
         }
 
         override fun getItemId(position: Int): Long {
@@ -156,17 +185,18 @@ class DownloadDialog(
         }
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
-            val view = convertView ?: DownloadItem(context).apply {
-                setTitle(context.getString(R.string.download_media, position + 1))
-                setOnCopy {
-                    toClipboard(urls[position])
-                }
-                setOnDownload {
-                    download(context, tweetId, position + 1, urls[position]) {
-                        AndroidLogger.toast(context.getString(R.string.download_completed))
-                    }
+            // listeners are set on every call so a recycled row never keeps
+            // the previous position's media
+            val view = convertView as? DownloadItem ?: DownloadItem(context)
+            view.setOnCopy {
+                toClipboard(media[position].url)
+            }
+            view.setOnDownload {
+                download(context, tweetId, position + 1, media[position].url) {
+                    AndroidLogger.toast(context.getString(R.string.download_completed))
                 }
             }
+            view.setMedia(media[position], position + 1)
             return view
         }
     }
@@ -174,13 +204,13 @@ class DownloadDialog(
     init {
         addModuleAssetPath(context)
 
-        val adapter = DownloadMediaAdapter(context, tweetId, downloadUrls)
+        val adapter = DownloadMediaAdapter(context, tweetId, media)
         setAdapter(adapter, null)
 
         setNeutralButton(R.string.download_all) { _, _ ->
-            downloadUrls.forEachIndexed { i, j ->
-                download(context, tweetId, i + 1, j) {
-                    if (i == downloadUrls.size - 1) {
+            media.forEachIndexed { i, j ->
+                download(context, tweetId, i + 1, j.url) {
+                    if (i == media.size - 1) {
                         AndroidLogger.toast(context.getString(R.string.download_completed))
                     }
                 }

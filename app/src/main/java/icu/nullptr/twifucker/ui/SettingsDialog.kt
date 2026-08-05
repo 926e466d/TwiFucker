@@ -31,6 +31,19 @@ class SettingsDialog(context: Context) : AlertDialog.Builder(context) {
         private lateinit var outDialog: AlertDialog
         private lateinit var prefs: SharedPreferences
 
+        @Volatile
+        private var currentFragment: PrefsFragment? = null
+
+        /**
+         * The settings dialog's PrefsFragment starts activities (SAF folder
+         * picker, log export) and expects results via fragment dispatch, but
+         * X 12.13.0's MainActivity swallows activity results. MainActivityHook
+         * intercepts Activity.onActivityResult and forwards here instead.
+         */
+        fun forwardActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+            currentFragment?.onActivityResult(requestCode, resultCode, data)
+        }
+
         const val PREFS_NAME = "twifucker"
 
         const val REQUEST_EXPORT_LOG = 1001
@@ -225,6 +238,7 @@ class SettingsDialog(context: Context) : AlertDialog.Builder(context) {
                 REQUEST_SET_DOWNLOAD_DIRECTORY -> {
                     if (resultCode != Activity.RESULT_OK) {
                         modulePrefs.remove(PREF_DOWNLOAD_DIRECTORY)
+                        modulePrefs.sync()
                         refreshDownloadDirectory()
                         return
                     }
@@ -359,6 +373,7 @@ class SettingsDialog(context: Context) : AlertDialog.Builder(context) {
 
         outDialog = run {
             val prefsFragment = PrefsFragment()
+            currentFragment = prefsFragment
             act.fragmentManager.beginTransaction().add(prefsFragment, "settings").commit()
             act.fragmentManager.executePendingTransactions()
 
@@ -373,7 +388,9 @@ class SettingsDialog(context: Context) : AlertDialog.Builder(context) {
             }
             setNegativeButton(context.getString(R.string.settings_dismiss), null)
             setCancelable(false)
-            show()
+            show().apply {
+                setOnDismissListener { currentFragment = null }
+            }
         }
     }
 }
